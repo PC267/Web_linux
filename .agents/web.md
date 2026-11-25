@@ -589,8 +589,8 @@ deploying the page needs no kernel toolchain.
   tile per other open window (`#dock-terminal-K`, `#dock-display`,
   `#dock-preview`, ...), and while wland's relay is connected
   `#dock-wayland` (Ctrl-A w). Pins (`pins.ts`): localStorage `kw.pins`, an
-  ordered list of app ids and `group:<id>` (by default Terminal, the Browsers,
-  AI, Desktop, Graphics and Games groups, and Settings), changed from the
+  ordered list of app ids and `group:<id>` (by default Terminal and
+  Settings), changed from the
   tiles' and the launcher's menus (Keep in Dock, Remove from Dock, Move
   Left, Move Right); an entry the registry no longer has is kept but not
   shown. A pinned app's tile stands for its window (`appwindows.ts`

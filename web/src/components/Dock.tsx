@@ -13,8 +13,7 @@
 //   Ctrl-A o; dimmed while the system does not run: data-off, store.ts
 //   isRunning);
 // - the apps and launcher groups kept in the Dock (pins.ts; by default
-//   Terminal, Browsers, AI, Desktop, Graphics, Games and Settings; on phones
-//   Terminal, glmark2, Galculator, Desktop and Settings), in their order. A
+//   Terminal and Settings), in their order. A
 //   group's tile (#dock-group-<id>, GroupFace: its icon in front of a small
 //   fan of cards) opens its apps in a stack above it (DockStack.tsx
 //   #dock-stack; useStackHover below: a mouse resting on the tile opens it,
