@@ -198,6 +198,8 @@ export const DEFAULT_ROUTES: Readonly<Record<string, string>> = Object.freeze({
 	// (Ollama's registry), which the llama.cpp and Ollama apps' scripts ask first (apps/agents), and
 	// /claude, /nodejs, /opencode, /astral and /github/astral-sh/uv, which the install shim asks
 	// first where the name resolves to a routed address (guest/base/rootfs/usr/lib/kw/shim).
+	// And /ppa/OWNER/PPA/ubuntu and /ports/ubuntu-ports (Launchpad's and ports.ubuntu.com's dists
+	// and pool, arm64 and all), which VLC's script asks first likewise (apps/media/vlc.ts).
 	"mirror.unkernel.dev": "https://mirror.unkernel.dev",
 	// Ladybird's apt repository (apps/browsers/ladybird.ts), as Debian's.
 	"apt.ladybird.org": "https://mirror.unkernel.dev/ladybird",

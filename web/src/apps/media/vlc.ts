@@ -7,16 +7,21 @@
 // (Launchpad, ~videolan/master-daily), the newest at the first run or at
 // `./vlc.sh update`, with every library it needs from Ubuntu 26.10 itself,
 // glibc included (PACKAGES, below: the release pocket's packages, pinned by
-// SHA-256; the daily build's by the SHA-512 of its index, read over https).
+// SHA-256; the daily build's by the SHA-512 of its index, and that by the PPA's
+// signature, KEY below, with apt's verifier, sqv).
 // They are unpacked into ~/.apps/vlc/root (526 MiB), never installed: no
 // package script runs, nothing needs root, and deleting the directory
 // removes it all.
 //
-// The page fetches the libraries (`bundle`, 140 MiB: plain http over its own
-// Wisp connection, ports.ubuntu.com sends no CORS headers) and pushes the
-// packages into debs/; vlc.sh checks them, fetches what is missing itself
-// and unpacks them (16 s; the push 1 s: CLI, 2026-11-25). The daily build (10 MiB, unpinned:
-// https only) is the guest's own download.
+// The page fetches the libraries (`bundle`, 140 MiB: from its mirror, else
+// plain http over its own Wisp connection, ports.ubuntu.com sends no CORS
+// headers) and pushes the packages into debs/; vlc.sh checks them, fetches
+// what is missing itself and unpacks them (16 s; the push 1 s: CLI,
+// 2026-11-25). The daily build (10 MiB, unpinned) is the guest's own
+// download. Both downloads of vlc.sh ask the page's mirror first where the
+// page routes it, then the upstreams, all plain http: the checks above are
+// what makes that safe (and Launchpad's https answered more than half of
+// the requests with 503 after 5 s, its http none: 2026-11-25).
 //
 // VLC runs through that tree's own ld.so (--inhibit-cache --library-path), so
 // it never takes the system's libraries while the tree has them, and no
@@ -41,6 +46,11 @@
 import type { TerminalApp } from "../types.ts";
 
 const UBUNTU = "http://ports.ubuntu.com/ubuntu-ports";
+/** The daily builds' PPA, below Launchpad's host and the mirror's /ppa. */
+const PPA = "videolan/master-daily/ubuntu";
+/** The page's mirror (config.ts DEFAULT_ROUTES), and its copy of UBUNTU. */
+const MIRROR = "mirror.unkernel.dev";
+const UBUNTU_MIRROR = "/ports/ubuntu-ports";
 /** The library list's version: root/.got/libs in the guest. */
 const LIBS = "2026-11-25";
 
@@ -52,32 +62,49 @@ set -e -o pipefail
 D=$(cd "$(dirname "$0")" && pwd)
 cd "$D"
 P=$D/root L=$D/root/usr/lib/aarch64-linux-gnu
-PPA=https://ppa.launchpadcontent.net/videolan/master-daily/ubuntu
 export LC_ALL=C.UTF-8
 mkdir -p root/.got debs tmp home/config home/data home/cache
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 
-# get TOOL LIST: the packages of LIST ("SUM URL" lines) into debs/, those that
-# are not there with their checksum, several at once.
+# bases: where the packages are, in the order they are asked (UBU, PPA). The
+# page's mirror is first where the page routes its name (it then resolves into
+# 198.51.100.0/24): plain http to it is answered by the page's own fetch() and
+# not carried over the network relay.
+bases() {
+	UBU=(${UBUNTU}) PPA=(http://ppa.launchpadcontent.net/${PPA})
+	case $(getent hosts ${MIRROR} 2>/dev/null | sed -n '1s/[[:space:]].*//p') in
+	198.51.100.*)
+		UBU=(http://${MIRROR}${UBUNTU_MIRROR} "${"$"}{UBU[@]}")
+		PPA=(http://${MIRROR}/ppa/${PPA} "${"$"}{PPA[@]}")
+		;;
+	esac
+}
+
+# get TOOL LIST BASE...: the packages of LIST ("SUM PATH" lines, below each
+# BASE) into debs/, those that are not there with their checksum, several at
+# once; what one BASE does not have is asked of the next.
 get() {
-	local bad
-	awk '{ n = $2; sub(/.*\//, "", n); print $1 "  debs/" n }' "$2" >tmp/sums
-	bad=$("$1" --quiet -c tmp/sums 2>/dev/null | sed -n 's/: FAILED.*//p') || true
-	[ -n "$bad" ] || return 0
-	printf '%s\n' "$bad" >tmp/bad
-	xargs -d '\n' rm -f <tmp/bad
-	awk 'NR == FNR { bad[$0] = 1; next } { n = $2; sub(/.*\//, "", n); n = "debs/" n; if (n in bad) printf "url = \"%s\"\noutput = \"%s\"\n", $2, n }' tmp/bad "$2" >tmp/curl
-	say "Downloading $(wc -l <tmp/bad) packages"
-	curl -fL -Z --parallel-max 8 --retry 3 -K tmp/curl || true
-	"$1" --quiet -c tmp/sums >/dev/null 2>&1 || { echo "Some packages did not arrive: run it again to get the rest." >&2; exit 1; }
+	local tool=$1 list=$2 bad base
+	shift 2
+	awk '{ n = $2; sub(/.*\//, "", n); print $1 "  debs/" n }' "$list" >tmp/sums
+	for base in "$@"; do
+		bad=$("$tool" --quiet -c tmp/sums 2>/dev/null | sed -n 's/: FAILED.*//p') || true
+		[ -n "$bad" ] || return 0
+		printf '%s\n' "$bad" >tmp/bad
+		xargs -d '\n' rm -f <tmp/bad
+		awk -v base="$base" 'NR == FNR { bad[$0] = 1; next } { n = $2; sub(/.*\//, "", n); n = "debs/" n; if (n in bad) printf "url = \"%s/%s\"\noutput = \"%s\"\n", base, $2, n }' tmp/bad "$list" >tmp/curl
+		say "Downloading $(wc -l <tmp/bad) packages from $(cut -d / -f 3 <<<"$base")"
+		curl -fL -Z --parallel-max 8 --retry 3 -K tmp/curl || true
+	done
+	"$tool" --quiet -c tmp/sums >/dev/null 2>&1 || { echo "Some packages did not arrive: run it again to get the rest." >&2; exit 1; }
 }
 
 # unpack LIST: the packages of LIST from debs/ into root/.
 unpack() {
-	local sum url f i=0 n
+	local sum path f i=0 n
 	n=$(wc -l <"$1")
-	while read -r sum url; do
-		i=$((i + 1)) f=${"$"}{url##*/}
+	while read -r sum path; do
+		i=$((i + 1)) f=${"$"}{path##*/}
 		printf '\r\033[KUnpacking %d of %d: %s' "$i" "$n" "${"$"}{f%%_*}"
 		dpkg-deb --fsys-tarfile "debs/$f" </dev/null | tar -x --no-same-owner -C root --exclude='./usr/share/doc' --exclude='./usr/share/man' --exclude='./usr/share/locale'
 	done <"$1"
@@ -86,28 +113,47 @@ unpack() {
 
 libs() {
 	[ "$(cat root/.got/libs 2>/dev/null)" = ${LIBS} ] && return
-	awk '{ print $1, "${UBUNTU}/" $3 }' packages.txt >tmp/libs
-	get sha256sum tmp/libs
+	awk '{ print $1, $3 }' packages.txt >tmp/libs
+	bases
+	get sha256sum tmp/libs "${"$"}{UBU[@]}"
 	unpack tmp/libs
 	echo ${LIBS} >root/.got/libs
 	rm -f debs/*
 }
 
+# index BASE: the daily builds' index below BASE into tmp/Packages, if the PPA
+# signed it (a key of all of VideoLAN's PPAs: Origin says which).
+index() {
+	local d=$1/dists/stonking sum
+	rm -f tmp/InRelease tmp/Release tmp/Packages tmp/Packages.gz
+	curl -fsSL --retry 3 -o tmp/InRelease "$d/InRelease" || return 1
+	curl -fsSL --retry 3 -o tmp/Packages.gz "$d/main/binary-arm64/Packages.gz" || return 1
+	sqv --keyring ppa.asc --cleartext --output tmp/Release tmp/InRelease >tmp/sqv.log 2>&1 || { echo "$d/InRelease is not signed by the PPA's key:" >&2; cat tmp/sqv.log >&2; return 1; }
+	grep -qx 'Origin: LP-PPA-videolan-master-daily' tmp/Release || { echo "$d is another PPA's" >&2; return 1; }
+	sum=$(awk '/^[^ ]/ { f = $1 == "SHA512:"; next } f && $3 == "main/binary-arm64/Packages.gz" { print $1 }' tmp/Release)
+	echo "$sum  tmp/Packages.gz" | sha512sum --status -c - || { echo "$d: the index is not the one signed" >&2; return 1; }
+	gzip -dc tmp/Packages.gz >tmp/Packages
+}
+
 daily() {
-	local v h f missing
+	local v h f missing base ok=
 	say "Looking for the newest daily build"
-	curl -fsSL --retry 3 "$PPA/dists/stonking/main/binary-arm64/Packages.gz" | gzip -dc >tmp/Packages
+	bases
+	for base in "${"$"}{PPA[@]}"; do
+		if index "$base"; then ok=1; break; fi
+	done
+	[ -n "$ok" ] || { echo "The daily builds' index did not arrive: run it again." >&2; exit 1; }
 	v=$(awk 'BEGIN { RS = ""; FS = "\n" } $1 == "Package: vlc" { for (i = 2; i <= NF; i++) if ($i ~ /^Version: /) print substr($i, 10) }' tmp/Packages | sort -V | tail -n 1)
 	[ -n "$v" ] || { echo "No VLC in the daily builds' index" >&2; exit 1; }
 	[ "$v" != "$(cat root/.got/version 2>/dev/null)" ] || { echo "VLC $v is the newest"; return; }
 	say "VLC $v"
-	awk -v v="$v" -v ppa="$PPA" 'BEGIN { RS = ""; FS = "\n" }
+	awk -v v="$v" 'BEGIN { RS = ""; FS = "\n" }
 		$1 ~ /^Package: (vlc|vlc-bin|vlc-data|libvlc[0-9]+|libvlccore[0-9]+|libvlc-bin|vlc-plugin-base|vlc-plugin-qt|vlc-plugin-video-output)$/ {
 			ver = f = s = ""
 			for (i = 2; i <= NF; i++) { if ($i ~ /^Version: /) ver = substr($i, 10); if ($i ~ /^Filename: /) f = substr($i, 11); if ($i ~ /^SHA512: /) s = substr($i, 9) }
-			if (ver == v) print s, ppa "/" f
+			if (ver == v) print s, f
 		}' tmp/Packages >tmp/daily
-	get sha512sum tmp/daily
+	get sha512sum tmp/daily "${"$"}{PPA[@]}"
 	rm -rf root/.got/version "$L/vlc" root/usr/share/vlc "$L"/libvlc*
 	unpack tmp/daily
 	say "Setting it up"
@@ -165,18 +211,19 @@ export default {
 	icon: { svg: '<path d="M12.0319 0c-.8823 0-1.0545.136-1.0545.136-.1738.056-.3556.255-.4105.43L9.683 3.3808c.4729.1729 1.3222.4266 2.2337.4266 1.0987 0 2.017-.3494 2.3763-.5075L13.4352.566c-.055-.1755-.237-.3707-.4067-.4374 0 0-.1142-.1286-.9966-.1286zm3.5645 7.455c-.3601.34-1.3276.9373-3.6797.9373-2.2929 0-3.189-.5678-3.5213-.9113l-1.3887 4.4227c.2272.3614 1.2539 1.5594 4.8847 1.5594 3.7569 0 4.8539-1.3467 5.0649-1.6737zm-8.5897 4.4487l-1.0025 3.1922H4.3428c-.2486 0-.5097.1932-.5826.4315l-2.334 7.6317a.3962.3962 0 0 0-.0169.1537c-.0008.0053-.002.0099-.002.016 0 .0839.0233.226.0233.226.0322.2456.2612.4452.5098.4452h20.1192c.2487 0 .4768-.1994.5098-.4453 0 0 .0234-.142.0234-.226a.0245.0245 0 0 0-.0025-.01.3201.3201 0 0 0 .0024-.0313.4096.4096 0 0 0-.019-.1282l-2.3339-7.6318c-.0729-.2383-.334-.4314-.5826-.4314h-1.6636l.2005.6391c-.2407.4854-1.4886 2.38-6.3027 2.38-4.6003 0-5.8288-1.73-6.1107-2.3072z"/>' },
 	colors: ["#ff8800", "#9a3412"],
 	needs: { net: true, wayland: true },
-	packages: { debian: ["curl", "ca-certificates", "dbus-daemon"] },
+	packages: { debian: ["curl", "ca-certificates", "dbus-daemon", "sqv"] },
 	bundle: {
 		path: "debs",
 		unless: `[ "$(cat root/.got/libs)" = ${LIBS} ]`,
 		files: async () => PACKAGES.trim().split("\n").map((l) => {
 			const [sha256, size, path] = l.split(" ") as [string, string, string];
-			return { url: `${UBUNTU}/${path}`, sha256, size: Number(size) };
+			return { url: `${UBUNTU}/${path}`, mirror: `https://${MIRROR}${UBUNTU_MIRROR}/${path}`, sha256, size: Number(size) };
 		}),
 	},
 	files: async () => ({
 		"vlc.sh": { content: VLC, mode: 0o755 },
 		"packages.txt": PACKAGES,
+		"ppa.asc": KEY,
 		"README": "VLC 4's daily build, with its own libraries in ./root (delete it to remove them).\n" +
 			"  ./vlc.sh FILE|URL            play something\n" +
 			"  ./vlc.sh update              the newest daily build\n" +
@@ -184,6 +231,38 @@ export default {
 	}),
 	commands: ["./vlc.sh"],
 } satisfies TerminalApp;
+
+// The PPA's signing key (Launchpad PPA for Videolan), fingerprint
+// 9B9881E64826CD6717BD62584792F0D24EAE4AD4 as Launchpad's API names it.
+const KEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+xsFNBGYzlYoBEAC/lK3lAmF0tQLYQ844PC6bq3kCzS+i8scDE+zhcWSfUe45tuo4
+Vysl/sJo1eHytApkoz+gGsaaia3mulvSTGJ6TXA6exTWwT2PWhKh1cGQHQWc8mRG
+fn8jwBDkxAfjyxRfjDas5STJMA9NUqsOZ4SCGZ38BV6w24qvrm3SeYuUgopR5aSj
+I2X5Ki9P3BPflTDZrlh/wnlyZgotnmO7D+EuArE4WWw2bTpotC1LjSBKveeAQW1R
+hIwsqkmIDAVsczfbGNvE+sux0vA33cer2Y0C7jqJbxtsN1p9zfbSMzutgVl/ZD2j
+nHim3RnASoFNeiIchAIsdgosDPvQSjE4pmalyLXSNaa9rFEV4QnxwAIZ9DYniuzD
++YlwRWL2coEzK5JClkluBQ89r5Mnm2z/jSiFRHNH2giUJZm4kuEe+GWJtgMBi6yy
+7wvE2Z7UfKjz5bYJbGLgZAX5wtycaxdre6ijyXy78wDxHaAF0HqPRe+fZ5jeGG35
+AEqg6BrTTs75ME1HqHdePXUbyikxsBn2hDNRSk/I16s3fAL3kYSOsLMyXEizHWYo
+Yz4lDffHzVNsICP5Blc/Ywu8JOb39ZHqBuKLmms5zK2aWQzuwye/essuIRFajAKJ
+VtH7yc2cNFi0x35I3dgfFWQ6JDs/2x/mW1/i7vTwRme8SuzWIUtTVy1V+QARAQAB
+zRpMYXVuY2hwYWQgUFBBIGZvciBWaWRlb2xhbsLBjgQTAQoAOBYhBJuYgeZIJs1n
+F71iWEeS8NJOrkrUBQJmM5WKAhsDBQsJCAcCBhUKCQgLAgQWAgMBAh4BAheAAAoJ
+EEeS8NJOrkrUNnoP/1muBT6nFB8p7lGgAyyztf4BFzHXXg3ozYSYds7YtAElJLSw
+5J4FZm3PuY6YIEFNtx+b2qkHA8Eaf0iu3O0QXERPrt5vhWwvireYWk6WuXj7V2Nb
+xJQpwyBcFDWVM+/YSTyJUYF6fWm7y1RSWjamUwTAqtKABu/VHHc3kU4mUDhVZB+P
+Tbu2uM/XdbiSyKGI0OPYMtQka8lE8SARW2Y+ySIj3E5kwMNldBJ/ERv9kIfaBVg8
+TmEzuSP0eh+PtsvFNhGaI2oXXTOfkyTHyKdso8f+Wxd/8umN9e6i3oxJD4g8jvIu
+0tM5u9kMHddcvGnhCjfPVkOlfS5xRbM/tMwcb9ZTgkEdmny0x9XToRLxkTyqQM7o
+nHMvjshFzwdf0hAVoG9I5PReMyjIp6Tu+itfQttjP55QggNgrUoFmBhCj0dEXpSJ
+QS2TX6Uu+uwHMQ28skjqp3l3/oCh+x1E7M22QDb435jrPXsDTxmZ6SAPL9ResfYU
+oqf6CInxHxQjfRG/Kiwp6Htlc13ztCXERBeW0gloU5EvcS1c6lb2tjA8MQbQLjea
+mM9jbCXvTh3stlDU0UQ78yj7HODxoVAbo9mjiriE4g7WCPmGiALZjDR+4FqM+GpZ
+Tmtf5Brje1qySznxZIs2Lae2YFcHNEhaJ2jfApDfthkk5YaHIKLyAxgsYgDv
+=G0L2
+-----END PGP PUBLIC KEY BLOCK-----
+`;
 
 // What the daily build needs from Ubuntu 26.10 arm64, one "SHA256 SIZE PATH"
 // line per package, PATH below UBUNTU: the packages with a library that its

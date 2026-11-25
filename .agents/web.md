@@ -441,7 +441,9 @@ deploying the page needs no kernel toolchain.
   the llama.cpp and Ollama apps' scripts, and /claude, /nodejs, /opencode,
   /astral and /github/astral-sh/uv by the install shim, only where the
   name resolves to a routed address (it checks nothing against a
-  checksum); the Ubuntu app's tarball is the page's own fetch of /ubuntu; `?routes=0` sends them
+  checksum), and /ppa (Launchpad) and /ports (ports.ubuntu.com) by VLC's
+  script, where it does too; the Ubuntu app's tarball is the page's own
+  fetch of /ubuntu, VLC's libraries of /ports; `?routes=0` sends the guest's
   through Wisp too). A page served from an origin outside the
   Wisp server's allow list needs its own Wisp server (js.md). A `ws://`
   server is blocked as mixed content on an `https://` page.
@@ -2258,7 +2260,9 @@ sends Access-Control-Allow-Origin such as releases.fx.sh, is a direct
 API (`kw-files-v1`), then pushes it with one `vm.exec()` (through a
 `.part` file, size checked). A failure is a line in the installer's log,
 not fatal, so the app's script checks the file itself and downloads it
-when it is missing (Ubuntu does). On 2026-11-15 (Node, the default Wisp
+when it is missing (Ubuntu does). A `bundle` is many files fetched so,
+each from its `mirror` (a CORS site, `fetch()`) first when it names one
+(VLC). On 2026-11-15 (Node, the default Wisp
 server) the riscv64 Ubuntu Base tarball (31 MB) took 1.5 to 4.4 s to
 fetch and 0.2 s to push; the arm64 26.10 one (35 MB) took 0.3 s to push
 (Node SDK, 2026-11-18). Launch failures are toasts. The installer is

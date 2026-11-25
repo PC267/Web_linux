@@ -13,7 +13,8 @@
 //   SHA-256 is what makes that safe, so every file has one. Up to
 //   MAX_REDIRECTS redirects are followed. A file whose site sends
 //   Access-Control-Allow-Origin (`cors`, e.g. releases.fx.sh, https only)
-//   is fetched directly with fetch() instead.
+//   is fetched directly with fetch() instead, and a bundle's file with a
+//   `mirror` from there first.
 // - Files are kept in the Cache API (CACHE_NAME), keyed by their http URL,
 //   and checked against the SHA-256 on every use; a cached copy that does
 //   not match is deleted. Entries are not expired: a file is pinned by its
@@ -26,13 +27,16 @@
 //   its size and renames it, so a reader never sees a partial file. The
 //   whole file is in page memory once, as vm.exec()'s input.
 // - getFiles() fetches many small files (an app's `bundle`), a few at once
-//   over one Wisp connection, each as getFile() does; pushFiles() writes a
-//   batch of them into a directory with one exec, as a tar.
+//   over one Wisp connection, each as getFile() does (its first try from
+//   its mirror, if it names one, until the mirror failed too often);
+//   pushFiles() writes a batch of them into a directory with one exec, as a
+//   tar.
 
 import { DEFAULT_WISP_SERVERS, fetchOver, wispBackend, type ByteDuplex, type GuestConnect, type KernelHandle, type NetBackend } from "./sdk.ts";
 
 const CACHE_NAME = "kw-files-v1";
 const MAX_REDIRECTS = 5;
+const MIRROR_WAIT_MS = 20_000;
 
 /** fetchOver()'s connect over a NetBackend: the given port on a fixed remote host. */
 export function backendConnect(backend: NetBackend, host: string): GuestConnect {
@@ -104,6 +108,11 @@ export interface FileSpec {
 	 * as given) instead of plain http over Wisp. For https-only sites.
 	 */
 	cors?: boolean;
+	/**
+	 * Another URL of the file, whose site sends Access-Control-Allow-Origin:
+	 * getFiles() tries it first, with fetch(). The cache goes by `url`.
+	 */
+	mirror?: string;
 }
 
 export type FileSource = "cache" | "downloaded";
@@ -116,19 +125,32 @@ async function sha256(bytes: Uint8Array): Promise<string | null> {
 	return hex(await crypto.subtle.digest("SHA-256", bytes as Uint8Array<ArrayBuffer>));
 }
 
+/** fetch() from a mirror, whose answer must begin within MIRROR_WAIT_MS (not kept in the browser's HTTP cache: CACHE_NAME has the file). */
+async function mirrorFetch(url: string, signal?: AbortSignal): Promise<Response> {
+	const late = new AbortController();
+	const timer = setTimeout(() => late.abort(new Error("no answer from the mirror")), MIRROR_WAIT_MS);
+	try {
+		return await fetch(url, { cache: "no-store", signal: signal ? AbortSignal.any([signal, late.signal]) : late.signal });
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
 async function openCache(): Promise<Cache | null> {
 	try { return typeof caches === "undefined" ? null : await caches.open(CACHE_NAME); } catch { return null; }
 }
 
 /**
  * The file's bytes, from the browser cache when a copy there matches its
- * SHA-256, else downloaded over Wisp, checked and cached. Rejects on a
- * network error, an HTTP error or a hash mismatch.
+ * SHA-256, else downloaded (over Wisp, or with fetch()), checked and
+ * cached. Rejects on a network error, an HTTP error or a hash mismatch.
  */
 export async function getFile(f: FileSpec, opts: {
 	servers?: readonly string[] | null;
 	/** Fetch over this backend, which stays open, instead of one of its own. */
 	backend?: NetBackend;
+	/** Fetch from f.mirror (required then), and nothing else. */
+	mirror?: boolean;
 	signal?: AbortSignal;
 	onProgress?: (got: number, total: number | null) => void;
 } = {}): Promise<{ bytes: Uint8Array; source: FileSource; checked: boolean }> {
@@ -142,10 +164,13 @@ export async function getFile(f: FileSpec, opts: {
 		await cache!.delete(key).catch(() => {});
 	}
 
-	const own = f.cors || opts.backend ? null : wispBackend(opts.servers?.length ? opts.servers : [...DEFAULT_WISP_SERVERS]);
-	const backend = f.cors ? null : opts.backend ?? own;
+	const direct = opts.mirror ? f.mirror! : f.cors ? f.url : null;
+	const own = direct || opts.backend ? null : wispBackend(opts.servers?.length ? opts.servers : [...DEFAULT_WISP_SERVERS]);
+	const backend = direct ? null : opts.backend ?? own;
 	try {
-		const res = backend ? await httpGet(backend, f.url, { signal: opts.signal }) : await fetch(f.url, { signal: opts.signal });
+		const res = backend ? await httpGet(backend, f.url, { signal: opts.signal })
+			: opts.mirror ? await mirrorFetch(direct!, opts.signal)
+			: await fetch(direct!, { signal: opts.signal });
 		if (!res.ok || !res.body) {
 			await res.body?.cancel();
 			throw new Error(`HTTP ${res.status}`);
@@ -196,8 +221,10 @@ export async function pushFile(vm: KernelHandle, path: string, bytes: Uint8Array
 
 /** At most this many of a bundle's files are fetched at once. */
 const PARALLEL = 6;
-/** Tries per file of a bundle. */
+/** Tries per file of a bundle, besides its mirror's. */
 const TRIES = 3;
+/** After this many files the mirror did not give, the rest do not ask it. */
+const MIRROR_FAILS = 6;
 
 /**
  * Fetch files, a few at once, each handed to onFile as it arrives (in any
@@ -218,19 +245,22 @@ export async function getFiles(files: readonly FileSpec[], opts: {
 	const stop = new AbortController();
 	const signal = opts.signal ? AbortSignal.any([opts.signal, stop.signal]) : stop.signal;
 	const got = new Array<number>(files.length).fill(0);
-	let sum = 0, next = 0;
+	let sum = 0, next = 0, mirrorFails = 0;
 	const progress = (i: number, n: number) => { sum += n - got[i]!; got[i] = n; opts.onProgress?.(sum); };
 	const worker = async () => {
 		while (next < files.length) {
 			const i = next++, f = files[i]!;
-			for (let t = 1; ; t++) {
+			let mirror = !!f.mirror && mirrorFails < MIRROR_FAILS;
+			for (let t = mirror ? 0 : 1; ; t++) {
 				signal.throwIfAborted();
 				let file;
 				try {
-					file = await getFile(f, { backend, signal: AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]), onProgress: (n) => progress(i, n) });
+					file = await getFile(f, { backend, mirror, signal: AbortSignal.any([signal, AbortSignal.timeout(5 * 60_000)]), onProgress: (n) => progress(i, n) });
 				} catch (e) {
 					progress(i, 0);
 					if (signal.aborted || t >= TRIES) throw signal.aborted ? signal.reason : new Error(`${f.url}: ${(e as Error)?.message ?? e}`);
+					if (mirror) mirrorFails++;
+					mirror = false;
 					continue;
 				}
 				progress(i, file.bytes.length);
