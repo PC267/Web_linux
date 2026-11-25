@@ -61,6 +61,13 @@ console() { setsid -c /usr/bin/kwbox tty login <>/dev/hvc0 >&0 2>&0 & role[$!]=c
 kwtty() { { /usr/lib/kw/net wait 2>/dev/null; exec /usr/bin/kwbox tty serve; } </dev/null & role[$!]=kwtty; started[$!]=$SECONDS; }
 console
 kwtty
+# D-Bus's machine id, once per machine (the image has none, else every
+# machine would share it): dbus-daemon's postinst makes it on a Debian
+# system. A second later: made here at once, it delays the prompt by 15 ms
+# (2026-11-25).
+if [ -d /var/lib/dbus ] && [ ! -s /var/lib/dbus/machine-id ] && [ ! -s /etc/machine-id ]; then
+	{ sleep 1; read -r id < /proc/sys/kernel/random/uuid && echo "${id//-/}" > /var/lib/dbus/machine-id; } </dev/null &
+fi
 while [ -z "$action" ]; do
 	pid=
 	# Returns for one of our children, or when a trapped signal arrives.

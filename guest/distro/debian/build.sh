@@ -27,7 +27,7 @@
 #                             by the image's apt at build time (needs the
 #                             base bundle and node; else left out)
 #   curl, wget, ca-certificates, unzip, procps, less, vim-tiny, xz-utils, zstd,
-#   iproute2, htop, tmux, sudo, libatomic1, sysv-rc installed
+#   iproute2, htop, tmux, sudo, libatomic1, sysv-rc, dbus-daemon installed
 #                             (DEBIAN_PACKAGES, below; needs the same)
 #   /usr/lib/kw-commands      "NAME PACKAGE" per command of main, for
 #                             kw-apt-install (command not found:
@@ -222,7 +222,9 @@ chmod 755 "$stage/usr/lib/kw/wlandr"
 # libatomic1: the official Node.js build links it (the kw layer's node shim).
 # sysv-rc (with insserv and startpar): the service runner kw-init drives
 # (below, and rootfs/usr/local/sbin/kw-init).
-DEBIAN_PACKAGES="curl wget ca-certificates unzip procps less vim-tiny xz-utils zstd iproute2 htop tmux sudo libatomic1 sysv-rc"
+# dbus-daemon: session buses for desktop apps (dbus-run-session); nothing
+# starts at boot (the system bus is the package dbus).
+DEBIAN_PACKAGES="curl wget ca-certificates unzip procps less vim-tiny xz-utils zstd iproute2 htop tmux sudo libatomic1 sysv-rc dbus-daemon"
 # Both are made by the image's own programs: the tree as it is at that
 # point becomes a first image (erofs, uncompressed), which boots on the
 # distroless bundle (guest/tools/vm-run.ts); files come out over exec's
@@ -244,8 +246,9 @@ DEBIAN_PACKAGES="curl wget ca-certificates unzip procps less vim-tiny xz-utils z
 #    (maintainer scripts included: update-ca-certificates fills
 #    /etc/ssl/certs, update-alternatives /etc/alternatives). What the install
 #    created or changed in the root overlay's upper layer (ctime after a
-#    stamp; not /var/log, ldconfig's aux-cache with its inode numbers, apt's
-#    caches or the .debs) comes out as a tar and goes into the tree, and what
+#    stamp; not /var/log, ldconfig's aux-cache with its inode numbers, D-Bus's
+#    random machine id (kw-init makes one per machine), apt's caches or the
+#    .debs) comes out as a tar and goes into the tree, and what
 #    it deleted (whiteouts) is deleted there; mktree.py then gives the new
 #    files root:root, their modes and the upstream epoch, so a rebuild is
 #    identical.
@@ -313,7 +316,7 @@ else
 		cd $u
 		find . -mindepth 1 -cnewer /tmp/kw-stamp -type c | sort > /tmp/kw-gone
 		find . -mindepth 1 -cnewer /tmp/kw-stamp ! -type c ! -path './var/log/*' \\
-			! -path ./var/cache/ldconfig/aux-cache ! -path './var/cache/apt/*' ! -path './kw-debs*' | sort > /tmp/kw-list
+			! -path ./var/cache/ldconfig/aux-cache ! -path ./var/lib/dbus/machine-id ! -path './var/cache/apt/*' ! -path './kw-debs*' | sort > /tmp/kw-list
 		tar -cf /tmp/kw-pkgs.tar --no-recursion --numeric-owner -T /tmp/kw-list" ||
 		{ echo "debian: installing $DEBIAN_PACKAGES in the image failed" >&2; exit 1; }
 	rm -rf "$archives"

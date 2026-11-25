@@ -379,7 +379,9 @@ layer: boot to a prompt 0.25 s (Alpine) and 0.32 s (Debian) from
   image only; the page's boot (`kw.wayland=1`) reads it, and the build's
   traced boots boot as the page does (`KW_TRACE_BOOT` in
   `guest/lib/image.sh`), so it is in the boot set.
-  `DEBIAN_PACKAGES` in build.sh (curl, ca-certificates, unzip) are
+  `DEBIAN_PACKAGES` in build.sh (curl, ca-certificates, unzip, dbus-daemon
+  for session buses, which starts nothing at boot: kw-init makes its
+  machine id, which the image leaves out, once per machine) are
   installed at build time by the image's apt in the same build VM, from
   .debs the host fetches from snapshot.debian.org (checked against the
   baked lists); the install's changes to the overlay's upper layer are
