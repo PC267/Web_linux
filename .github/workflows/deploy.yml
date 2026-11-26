@@ -21,26 +21,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1. 安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 12.14.0
 
-      # 2. 设置 Node.js (已移除 cache 配置以避免找不到锁文件的报错)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
 
-      # 3. 进入 web 目录安装依赖并构建
+      # 构建前端，并传入 Token 以自动下载 Release 中的镜像
       - name: Install and Build
         working-directory: ./web
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # 关键：提供 API 权限以获取镜像
         run: |
           pnpm install
           pnpm run build
 
-      # 4. 上传 Nitro 静态预设生成的产物
+      # 上传 Nitro 生成的静态产物 (.output/public)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
