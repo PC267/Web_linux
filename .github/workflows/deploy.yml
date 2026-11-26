@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ] # 如果你的默认分支是 master，请改为 master
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -10,8 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-# 允许一个并发部署，跳过正在运行和最新排队之间的排队运行。
-# 但是，请不要取消进行中的运行，因为我们希望让这些生产部署完成。
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -23,46 +21,38 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. 设置 Node.js 环境 (升级到 24 以消除弃用警告，并开启 pnpm 缓存)
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'pnpm'
-
-      # 2. 安装 pnpm (解决退出码 127 的核心步骤)
+      # 1. 先安装 pnpm，确保它在 PATH 中
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      # 3. 安装 Zig 环境 (Web_linux 项目编译 WASM 必需)
+      # 2. 再设置 Node.js 并启用 pnpm 缓存
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'   # 使用 Node 24 以消除弃用警告
+          cache: 'pnpm'        # 此时 pnpm 已存在，缓存可以正常工作
+
+      # 3. 安装 Zig 环境（Web_linux 编译 WASM 必需）
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: 0.13.0 # 如果项目 README 指定了具体版本，请在此修改
+          version: 0.13.0
 
       # 4. 安装项目依赖
       - name: Install dependencies
         run: pnpm install
 
-      # 5. 执行构建
+      # 5. 执行构建（请根据 package.json 中的实际脚本名调整）
       - name: Build project
-        run: pnpm run build:release # 请根据项目 package.json 中的实际脚本调整，如果是 pnpm build 则修改此处
+        run: pnpm run build:release
 
-      # 6. 处理 GitHub Pages 的子路径问题 (非常重要！)
-      # 如果你的项目没有自动处理 base path，可能需要手动执行以下命令或修改配置
-      # 此步骤根据你的实际情况保留或删除
-      # - name: Fix Base Path (Optional)
-      #   run: |
-      #     sed -i 's|href="/|href="/Web_linux/|g' dist/index.html
-      #     sed -i 's|src="/|src="/Web_linux/|g' dist/index.html
-
-      # 7. 上传构建产物
+      # 6. 上传构建产物
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist # 确保这是你项目真实的构建输出目录（如 dist, build, public 等）
+          path: ./dist   # 确保这是项目真实的输出目录
 
   deploy:
     needs: build
