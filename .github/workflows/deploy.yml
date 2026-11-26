@@ -1,4 +1,4 @@
-name: Deploy Static Site to GitHub Pages
+name: Deploy Web_linux to GitHub Pages
 
 on:
   push:
@@ -15,24 +15,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 直接上传静态文件，不需要任何编译步骤
+      # 1. 安装 pnpm (必须在 setup-node 之前)
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # 2. 设置 Node.js 24 (消除弃用警告) 并开启缓存
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: './web/pnpm-lock.yaml'
+
+      # 3. 进入 web 目录安装依赖并构建
+      - name: Install and Build
+        working-directory: ./web
+        run: |
+          pnpm install
+          pnpm run build
+
+      # 4. 上传 Nitro 静态预设生成的产物
+      # static 预设通常会将结果输出到 .output/public
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # 请根据实际情况修改这里的 path！
-          # 先去仓库里点开 web 文件夹，看看有没有 index.html。
-          # 如果有，就用 ./web 。如果没有，请改成 ./ 
-          path: './web' 
+          path: ./web/.output/public
 
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
