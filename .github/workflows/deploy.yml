@@ -21,19 +21,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1. 安装 pnpm：直接写明版本 12.14.0，避免它去根目录找 package.json 报错
+      # 1. 安装 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 12.14.0
 
-      # 2. 设置 Node.js 24 并开启缓存
+      # 2. 设置 Node.js (已移除 cache 配置以避免找不到锁文件的报错)
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: 'pnpm'
-          cache-dependency-path: './web/pnpm-lock.yaml'
 
       # 3. 进入 web 目录安装依赖并构建
       - name: Install and Build
