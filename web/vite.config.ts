@@ -159,7 +159,7 @@ function wlandPkgPlugin(dir: string): Plugin {
 }
 
 export default defineConfig({
-	base: '/Web_linux/', // 必须添加：修复 GitHub Pages 子路径导致的资源 404 白屏问题
+	base: '/Web_linux/', // [FIX] 必须添加：修复 GitHub Pages 子路径导致的资源 404 白屏问题
 	// Every interface, so a phone on the LAN can open http://<this-machine>:8080/.
 	server: {
 		host: true,
@@ -266,7 +266,16 @@ export default defineConfig({
 					vk = `new URL(import.meta.ROLLUP_FILE_URL_${ref}, import.meta.url)`;
 				}
 				const images = dev ? await (devImages ??= rescanImages(s)) : s.distros;
-				const distros = images.map(({ name, url, size, imageId }) => ({ name, url, size, ...(imageId ? { imageId } : {}) }));
+				
+				// [FIX] 修复图片路径的生成逻辑，强制拼接 base 路径以防止 404
+				const basePath = this.environment.config.base || '/';
+				const distros = images.map(({ name, url, size, imageId }) => {
+					const finalUrl = (!dev && url.startsWith('/')) 
+						? `${basePath.replace(/\/$/, '')}${url}` 
+						: url;
+					return { name, url: finalUrl, size, ...(imageId ? { imageId } : {}) };
+				});
+
 				return [
 					`export const kernelUrl = ${up};`,
 					`export const kernelSmpUrl = ${smp};`,
@@ -335,7 +344,7 @@ export default defineConfig({
 		react(),
 		tailwindcss(),
 		nitro({
-			preset: 'static', // 必须添加：强制 Nitro 输出纯静态文件，而不是 Node 服务器
+			preset: 'static', // [FIX] 必须添加：强制 Nitro 输出纯静态文件，而不是 Node 服务器
 			...(wlandPkg ? { buildDir: path.join(wlandLocal, "build"), output: { dir: path.join(wlandLocal, "output") } } : {}),
 			// The kernel (9 MiB) is sent br/zstd/gzip-encoded by the Node server.
 			// Every file in the output's public directory is compressed (types
