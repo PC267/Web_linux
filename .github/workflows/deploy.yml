@@ -21,11 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 1. 安装 pnpm (删除了 version，让它自动读取 web/package.json)
+      # 1. 安装 pnpm：直接写明版本 12.14.0，避免它去根目录找 package.json 报错
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          package_json_file: './web/package.json' # 明确指定去哪里读取版本号
+          version: 12.14.0
 
       # 2. 设置 Node.js 24 并开启缓存
       - name: Setup Node.js
