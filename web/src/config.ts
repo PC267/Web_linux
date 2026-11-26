@@ -209,7 +209,10 @@ export const DEFAULT_ROUTES: Readonly<Record<string, string>> = Object.freeze({
 export const REPO = "https://github.com/pithings/unkernel";
 
 /** The data disk sizes Settings offers, in GiB; the first is the default (the template's size). */
-export const DATA_SIZES: readonly number[] = [4, 8, 16, 32, 64];
+/*
+*export const DATA_SIZES: readonly number[] = [4, 8, 16, 32, 64];
+*/
+export const DATA_SIZES: readonly number[] = [16, 8, 4, 32, 64];//改为16G储存
 export const DATA_SIZE_DEFAULT = DATA_SIZES[0]!;
 
 /**
@@ -566,7 +569,10 @@ export function readConfig(search: string = location.search, saved: Record<strin
 		distroWhy,
 		guest: distro?.name ?? "none",
 		append: append || null,
-		memMiB: fixed ? Number(memParam) : auto.mib,
+		/*
+		*memMiB: fixed ? Number(memParam) : auto.mib,
+		*/
+		memMiB: fixed ? Number(memParam) : 4096,//改为4G内存
 		memWhy: fixed ? `set to ${memParam} MiB` : auto.why,
 		memAutoMiB: auto.mib,
 		memParam: fixed ? memParam : null,
