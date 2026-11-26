@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy Static Site to GitHub Pages
 
 on:
   push:
@@ -15,52 +15,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # 1. 先安装 pnpm，确保它在 PATH 中
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      # 2. 再设置 Node.js 并启用 pnpm 缓存
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'   # 使用 Node 24 以消除弃用警告
-          cache: 'pnpm'        # 此时 pnpm 已存在，缓存可以正常工作
-
-      # 3. 安装 Zig 环境（Web_linux 编译 WASM 必需）
-      - name: Setup Zig
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.13.0
-
-      # 4. 安装项目依赖
-      - name: Install dependencies
-        run: pnpm install
-
-      # 5. 执行构建（请根据 package.json 中的实际脚本名调整）
-      - name: Build project
-        run: pnpm run build:release
-
-      # 6. 上传构建产物
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./dist   # 确保这是项目真实的输出目录
-
   deploy:
-    needs: build
-    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 直接上传静态文件，不需要任何编译步骤
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # 请根据实际情况修改这里的 path！
+          # 先去仓库里点开 web 文件夹，看看有没有 index.html。
+          # 如果有，就用 ./web 。如果没有，请改成 ./ 
+          path: './web' 
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
