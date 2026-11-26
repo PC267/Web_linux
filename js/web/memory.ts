@@ -27,5 +27,5 @@ export function autoMemoryMiB(opts: { mobile?: boolean } = {}): { mib: number; w
 	const mobile = opts.mobile ?? isMobile();
 	if (devMem) return { mib: devMem <= 1 ? 96 : devMem <= 2 ? 256 : devMem <= 4 || mobile ? 512 : 2048, why: `auto: device reports ${devMem} GB` };
 	if (mobile) return { mib: 512, why: "auto: mobile device" };
-	return { mib: 2048, why: "auto" };
+	return { mib: 4096, why: "auto" };
 }
