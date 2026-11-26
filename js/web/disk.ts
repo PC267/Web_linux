@@ -388,7 +388,7 @@ export interface OpenDataDiskOptions extends DataDiskNameOptions {
  * page runs a snapshot of the template and says why).
  */
 export async function openDataDisk({ name = DATA_DISK_NAME, version = DATA_DISK_VERSION, template, mode = "persistent",
-	snapshotLimit = 64 * 1048576, size, log = (m) => console.warn(m), onError }: OpenDataDiskOptions): Promise<CowDisk> {
+	snapshotLimit = 64 * 1048576, size = 16 * 1073741824, log = (m) => console.warn(m), onError }: OpenDataDiskOptions): Promise<CowDisk> { // 👈 [修改] 将默认 size 设为了 8 GiB (8 * 1024^3)
 	const tpl = "indices" in template ? template : decodeKwsparse(await gunzipIfNeeded(template));
 	if (tpl.blockSize !== BLOCK) throw new Error(`data disk template: block size ${tpl.blockSize}, need ${BLOCK}`);
 	const haveIdb = typeof indexedDB !== "undefined";
